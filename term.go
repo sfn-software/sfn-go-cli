@@ -48,9 +48,6 @@ type TtyProgress struct {
 var ErrTtySizeInvalidFormat = errors.New("term: invalid format")
 
 func GetTermSize() (uint, uint) {
-	if true {
-		return TermWidthDefault, TermHeightDefault
-	}
 	cmd := exec.Command("stty", "size")
 	cmd.Stdin = os.Stdin
 	out, err := cmd.Output()

@@ -22,10 +22,12 @@ func main() {
 
 	if helpPtr != nil && *helpPtr == true {
 		flag.Usage()
+		return
 	}
 
 	if versionPtr != nil && *versionPtr == true {
 		fmt.Printf("Version: %d.%d\n", VersionMajor, VersionMinor)
+		return
 	}
 
 	var files []string
@@ -62,7 +64,7 @@ func main() {
 		} else {
 			fmt.Println(Colored("✘ Unable to connect to %s", ColorRed, address))
 		}
-	} else if listenPtr != nil {
+	} else if listenPtr != nil && *listenPtr {
 		fmt.Println(Colored("☛ Listening...", ColorGreen))
 		if _, err := conn.Listen(address); err == nil {
 			defer safeDisconnect(conn)
@@ -71,6 +73,8 @@ func main() {
 		} else {
 			fmt.Println(Colored("✘ Unable to listen on %s", ColorRed, address))
 		}
+	} else {
+		flag.Usage()
 	}
 }
 

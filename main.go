@@ -107,7 +107,10 @@ func processFiles(conn *Connection, files []string, dir string) {
 		if !hasMore {
 			break
 		}
-		if err != nil {
+		if err == ErrInvalidMD5Sum {
+			progress.Warning(err)
+			fmt.Println()
+		} else if err != nil {
 			if progress != nil {
 				progress.Failed(err)
 			} else {

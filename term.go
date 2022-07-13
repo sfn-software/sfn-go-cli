@@ -18,8 +18,9 @@ type State uint8
 const (
 	Done      State = 0
 	Failed    State = 1
-	Sending   State = 2
-	Receiving State = 3
+	Warning   State = 2
+	Sending   State = 3
+	Receiving State = 4
 )
 
 type TtyColor string
@@ -100,11 +101,17 @@ func (p *TtyProgress) Failed(err error) {
 	p.Draw(p.bytes)
 }
 
+func (p *TtyProgress) Warning(err error) {
+	p.state = Warning
+	p.err = err
+	p.Draw(p.bytes)
+}
+
 func (p *TtyProgress) Draw(bytes int64) {
 	p.bytes = bytes
 	human, metrics := getSizeMetrics(bytes)
 	percent := uint((bytes * 100) / p.fileSize)
-	if p.human != human || percent != p.percent || p.state == Done || p.state == Failed {
+	if p.human != human || percent != p.percent || p.state == Done || p.state == Failed || p.state == Warning {
 		p.human = human
 		p.percent = percent
 
@@ -114,7 +121,7 @@ func (p *TtyProgress) Draw(bytes int64) {
 		stateSymbol = Colored(stateSymbol, stateColor)
 
 		switch p.state {
-		case Failed:
+		case Failed, Warning:
 			fileNameWithErr := fixedLengthString(p.fileName+" → "+p.err.Error(), int(ttyWidth-2))
 			fmt.Printf("%s %s\r", stateSymbol, fileNameWithErr)
 		default:
@@ -132,6 +139,8 @@ func getStateAttrs(direction State) (string, TtyColor) {
 		return "↑", ColorReset
 	case Done:
 		return "✔", ColorGreen
+	case Warning:
+		return "↯", ColorYellow
 	default:
 		return "✘", ColorRed
 	}

@@ -37,11 +37,7 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 	}
 	switch opcode {
 	case OpFile:
-		name, err := readFileName(proto.conn.reader)
-		if err != nil {
-			return false, err
-		}
-		size, err := readFileSize(proto.conn.reader)
+		name, size, err := readFileNameAndSize(proto.conn.reader)
 		if err != nil {
 			return false, err
 		}
@@ -51,11 +47,7 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 		}
 		return true, nil
 	case OpMD5WithFile:
-		name, err := readFileName(proto.conn.reader)
-		if err != nil {
-			return false, err
-		}
-		size, err := readFileSize(proto.conn.reader)
+		name, size, err := readFileNameAndSize(proto.conn.reader)
 		if err != nil {
 			return false, err
 		}
@@ -73,11 +65,7 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 		}
 		return true, nil
 	case OpFileWithMD5:
-		name, err := readFileName(proto.conn.reader)
-		if err != nil {
-			return false, err
-		}
-		size, err := readFileSize(proto.conn.reader)
+		name, size, err := readFileNameAndSize(proto.conn.reader)
 		if err != nil {
 			return false, err
 		}
@@ -107,6 +95,18 @@ func readOpcode(reader *bufio.Reader) (byte, error) {
 		return 0, errors.New("unable to read type")
 	}
 	return opcode, nil
+}
+
+func readFileNameAndSize(reader *bufio.Reader) (name string, size int64, err error) {
+	name, err = readFileName(reader)
+	if err != nil {
+		return
+	}
+	size, err = readFileSize(reader)
+	if err != nil {
+		return
+	}
+	return
 }
 
 func readFileName(reader *bufio.Reader) (name string, err error) {

@@ -56,20 +56,22 @@ func main() {
 
 	address := fmt.Sprintf("%s:%d", *hostPtr, *portPtr)
 	if hostPtr != nil && *hostPtr != "" {
-		fmt.Println(Colored("☛ Connecting to %s", ColorGreen, address))
+		fmt.Println(Colored("☛ Connecting to %s", ColorCyan, address))
 		if _, err := conn.Connect(address); err == nil {
 			defer safeDisconnect(conn)
-			fmt.Println(Colored("✔ Connected", ColorGreen))
+			fmt.Println(Colored("⇄ Connected", ColorCyan))
 			processFiles(conn, files, *dirPtr)
+			fmt.Println(Colored("⇵ Transfer done", ColorCyan))
 		} else {
 			fmt.Println(Colored("✘ Unable to connect to %s", ColorRed, address))
 		}
 	} else if listenPtr != nil && *listenPtr {
-		fmt.Println(Colored("☛ Listening...", ColorGreen))
+		fmt.Println(Colored("☛ Listening...", ColorCyan))
 		if _, err := conn.Listen(address); err == nil {
 			defer safeDisconnect(conn)
-			fmt.Println(Colored("✔ Connected", ColorGreen))
+			fmt.Println(Colored("⇄ Connected", ColorCyan))
 			processFiles(conn, files, *dirPtr)
+			fmt.Println(Colored("⇵ Transfer done", ColorCyan))
 		} else {
 			fmt.Println(Colored("✘ Unable to listen on %s", ColorRed, address))
 		}
@@ -129,7 +131,9 @@ func safeDisconnect(conn *Connection) {
 	err := conn.Disconnect()
 	if err != nil {
 		fmt.Println(Colored("✘ Disconnection failure", ColorRed))
+		return
 	}
+	fmt.Println(Colored("↮ Disconnected", ColorCyan))
 }
 
 func scanDir(root string) ([]string, error) {

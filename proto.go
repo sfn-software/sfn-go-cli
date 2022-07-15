@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Proto struct {
@@ -23,12 +24,35 @@ const (
 	OpMD5WithFile  byte = 3
 	OpFileWithMD5  byte = 4
 	OpFileWithPath byte = 5
+
+	ProtocolPathSeparator = "/"
 )
 
 var (
 	ErrUnknownOpcode = errors.New("unknown opcode")
 	ErrInvalidMD5Sum = errors.New("md5 is invalid")
 )
+
+// mkdirp creates a directory, also creating missing parent folders if needed, like `mkdir -p` does.
+func mkdirp(path string) (err error) {
+	if len(path) == 0 {
+		return
+	}
+	if strings.HasPrefix(path, ProtocolPathSeparator) {
+		return errors.New("path can't start with separator")
+	}
+	if strings.HasSuffix(path, ProtocolPathSeparator) {
+		return errors.New("path can't end with separator")
+	}
+
+	return os.MkdirAll(path, os.ModeDir)
+}
+
+// convertSlashes converts protocol path separators to OS-native format. On Unix, this is a no-op.
+func convertSlashes(path string) string {
+	// TODO: implement
+	return path
+}
 
 func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl func(total int64)) (bool, error) {
 	opcode, err := readOpcode(proto.conn.reader)
@@ -82,6 +106,31 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 			return true, ErrInvalidMD5Sum
 		}
 		return true, nil
+	case OpFileWithPath:
+		name, size, err := readFileNameAndSize(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		innerPath, err := readFilePath(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		err = mkdirp(filepath.Join(path, convertSlashes(innerPath)))
+		if err != nil {
+			return false, err
+		}
+		sum, err := readFileContents(proto.conn.reader, proto.bs, path, name, size, pl)
+		if err != nil {
+			return false, err
+		}
+		origSum, err := readFileMD5(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		if sum != origSum {
+			return true, ErrInvalidMD5Sum
+		}
+		return true, nil
 	case OpDone:
 		return false, nil
 	default:
@@ -116,6 +165,16 @@ func readFileName(reader *bufio.Reader) (name string, err error) {
 		return
 	}
 	name = filepath.Base(string(line))
+	return
+}
+
+func readFilePath(reader *bufio.Reader) (ret string, err error) {
+	line, _, err := reader.ReadLine()
+	if err != nil {
+		err = errors.New("unable to read path")
+		return
+	}
+	ret = string(line)
 	return
 }
 

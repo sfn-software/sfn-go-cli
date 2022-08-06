@@ -10,6 +10,11 @@ import (
 const VersionMajor = 1
 const VersionMinor = 0
 
+type fileEntity struct {
+	filePath string
+	baseDir  string
+}
+
 func main() {
 	hostPtr := flag.String("connect", "", "Host address")
 	listenPtr := flag.Bool("listen", false, "Listen for connection")
@@ -19,6 +24,8 @@ func main() {
 	dirPtr := flag.String("dir", "", "Directory for receiving files")
 
 	flag.Parse()
+
+	dir := filepath.Clean(*dirPtr)
 
 	if helpPtr != nil && *helpPtr == true {
 		flag.Usage()
@@ -30,7 +37,7 @@ func main() {
 		return
 	}
 
-	var files []string
+	var files []fileEntity
 	args := flag.Args()
 	if len(args) > 0 {
 		for _, arg := range args {
@@ -40,14 +47,18 @@ func main() {
 				continue
 			}
 			if stat.IsDir() {
-				dirFiles, err := scanDir(arg)
+				dirFiles, err := scanDir(filepath.Clean(arg))
 				if err != nil {
 					fmt.Println(Colored("✘ Unable to scan dir %s", ColorRed, arg))
 					continue
 				}
 				files = append(files, dirFiles...)
 			} else {
-				files = append(files, arg)
+				e := fileEntity{
+					filePath: filepath.Clean(arg),
+					baseDir:  filepath.Dir(arg),
+				}
+				files = append(files, e)
 			}
 		}
 	}
@@ -60,7 +71,7 @@ func main() {
 		if _, err := conn.Connect(address); err == nil {
 			defer safeDisconnect(conn)
 			fmt.Println(Colored("⇄ Connected", ColorCyan))
-			processFiles(conn, files, *dirPtr)
+			processFiles(conn, files, dir)
 			fmt.Println(Colored("⇵ Transfer done", ColorCyan))
 		} else {
 			fmt.Println(Colored("✘ Unable to connect to %s", ColorRed, address))
@@ -70,7 +81,7 @@ func main() {
 		if _, err := conn.Listen(address); err == nil {
 			defer safeDisconnect(conn)
 			fmt.Println(Colored("⇄ Connected", ColorCyan))
-			processFiles(conn, files, *dirPtr)
+			processFiles(conn, files, dir)
 			fmt.Println(Colored("⇵ Transfer done", ColorCyan))
 		} else {
 			fmt.Println(Colored("✘ Unable to listen on %s", ColorRed, address))
@@ -80,12 +91,12 @@ func main() {
 	}
 }
 
-func processFiles(conn *Connection, files []string, dir string) {
+func processFiles(conn *Connection, files []fileEntity, dir string) {
 	proto := NewProto(conn)
 	for _, file := range files {
-		progress := NewProgress(file, 0, Receiving)
-		err := proto.SendFile(file, func(size int64) {
-			progress.fileSize = size
+		var progress *TtyProgress
+		err := proto.SendFile(file.baseDir, file.filePath, func(relDir string, size int64) {
+			progress = NewProgress(relDir, filepath.Base(file.filePath), size, Receiving)
 		}, func(total int64) {
 			progress.Draw(total)
 		})
@@ -101,8 +112,8 @@ func processFiles(conn *Connection, files []string, dir string) {
 	_ = proto.SendDone()
 	for {
 		var progress *TtyProgress
-		hasMore, err := proto.ReadFile(dir, func(name string, size int64) {
-			progress = NewProgress(name, size, Sending)
+		hasMore, err := proto.ReadFile(dir, func(relDir string, name string, size int64) {
+			progress = NewProgress(relDir, name, size, Sending)
 		}, func(total int64) {
 			progress.Draw(total)
 		})
@@ -136,11 +147,15 @@ func safeDisconnect(conn *Connection) {
 	fmt.Println(Colored("↮ Disconnected", ColorCyan))
 }
 
-func scanDir(root string) ([]string, error) {
-	var files []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+func scanDir(base string) ([]fileEntity, error) {
+	var files []fileEntity
+	err := filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			files = append(files, path)
+			e := fileEntity{
+				filePath: path,
+				baseDir:  base,
+			}
+			files = append(files, e)
 		}
 		return nil
 	})

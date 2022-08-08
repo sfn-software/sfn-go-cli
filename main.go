@@ -25,7 +25,11 @@ func main() {
 
 	flag.Parse()
 
-	dir := filepath.Clean(*dirPtr)
+	dir, err := filepath.Abs(*dirPtr)
+	if err != nil {
+		fmt.Println(Colored("✘ Unable to check dir %s", ColorRed, *dirPtr))
+		return
+	}
 
 	if helpPtr != nil && *helpPtr == true {
 		flag.Usage()
@@ -41,22 +45,27 @@ func main() {
 	args := flag.Args()
 	if len(args) > 0 {
 		for _, arg := range args {
-			stat, err := os.Stat(arg)
+			var argAbs string
+			var stat os.FileInfo
+			if argAbs, err = filepath.Abs(arg); err == nil {
+				stat, err = os.Stat(argAbs)
+			}
 			if err != nil {
 				fmt.Println(Colored("✘ Unable to open %s", ColorRed, arg))
 				continue
 			}
 			if stat.IsDir() {
-				dirFiles, err := scanDir(filepath.Clean(arg))
+				if dirFiles, err := scanDir(argAbs); err == nil {
+					files = append(files, dirFiles...)
+				}
 				if err != nil {
 					fmt.Println(Colored("✘ Unable to scan dir %s", ColorRed, arg))
 					continue
 				}
-				files = append(files, dirFiles...)
 			} else {
 				e := fileEntity{
-					filePath: filepath.Clean(arg),
-					baseDir:  filepath.Dir(arg),
+					filePath: argAbs,
+					baseDir:  filepath.Dir(argAbs),
 				}
 				files = append(files, e)
 			}

@@ -254,9 +254,11 @@ func readFileContents(reader *bufio.Reader, bufferSize int, path string, name st
 
 func (proto *Proto) SendFile(baseDir string, filePath string, ready func(relDir string, size int64), l func(total int64)) error {
 	fileName := filepath.Base(filePath)
-	relDir, err := getRelativeDir(baseDir, filePath)
+	relDir, err := filepath.Rel(baseDir, filepath.Dir(filePath))
 	if err != nil {
 		return err
+	} else if relDir == "." {
+		relDir = ""
 	}
 	stat, err := os.Stat(filePath)
 	if err != nil {
@@ -338,24 +340,6 @@ func (proto *Proto) SendFile(baseDir string, filePath string, ready func(relDir 
 		return errors.New("data flushing error")
 	}
 	return nil
-}
-
-func getRelativeDir(baseDir string, filePath string) (string, error) {
-	fileDir := filepath.Dir(filePath)
-	if len(fileDir) < len(baseDir) {
-		return "", errors.New("file path preparing failed")
-	}
-	rel := fileDir[len(baseDir):]
-	path := filepath.ToSlash(rel)
-	// Remove leading slash
-	if len(path) > 0 && path[0] == '/' {
-		path = path[1:]
-	}
-	// Remove trailing slash
-	if len(path) > 0 && path[len(path)-1] == '/' {
-		path = path[:len(path)-1]
-	}
-	return path, nil
 }
 
 func SetExecAny(mode os.FileMode) os.FileMode {

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-const VersionMajor = 1
+const VersionMajor = 2
 const VersionMinor = 0
 
 type fileEntity struct {

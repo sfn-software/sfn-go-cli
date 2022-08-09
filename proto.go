@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Proto struct {
@@ -23,6 +24,8 @@ const (
 	OpMD5WithFile  byte = 3
 	OpFileWithMD5  byte = 4
 	OpFileWithPath byte = 5
+
+	ProtocolPathSeparator = "/"
 )
 
 var (
@@ -30,7 +33,22 @@ var (
 	ErrInvalidMD5Sum = errors.New("md5 is invalid")
 )
 
-func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl func(total int64)) (bool, error) {
+// mkdirp creates a directory, also creating missing parent folders if needed, like `mkdir -p` does.
+func mkdirp(baseDir string, relPath string) (absDir string, err error) {
+	if len(relPath) == 0 {
+		absDir = baseDir
+	} else if strings.HasPrefix(relPath, ProtocolPathSeparator) {
+		err = errors.New("path can't start with separator")
+	} else if strings.HasSuffix(relPath, ProtocolPathSeparator) {
+		err = errors.New("path can't end with separator")
+	} else {
+		absDir = filepath.Join(baseDir, relPath)
+		err = os.MkdirAll(absDir, os.ModePerm)
+	}
+	return
+}
+
+func (proto *Proto) ReadFile(baseDir string, nl func(relDir string, name string, size int64), pl func(total int64)) (bool, error) {
 	opcode, err := readOpcode(proto.conn.reader)
 	if err != nil {
 		return false, err
@@ -41,8 +59,8 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 		if err != nil {
 			return false, err
 		}
-		nl(name, size)
-		if _, err = readFileContents(proto.conn.reader, proto.bs, path, name, size, pl); err != nil {
+		nl("", name, size)
+		if _, err = readFileContents(proto.conn.reader, proto.bs, baseDir, name, size, false, pl); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -51,12 +69,12 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 		if err != nil {
 			return false, err
 		}
-		nl(name, size)
+		nl("", name, size)
 		origSum, err := readFileMD5(proto.conn.reader)
 		if err != nil {
 			return false, err
 		}
-		sum, err := readFileContents(proto.conn.reader, proto.bs, path, name, size, pl)
+		sum, err := readFileContents(proto.conn.reader, proto.bs, baseDir, name, size, false, pl)
 		if err != nil {
 			return false, err
 		}
@@ -69,8 +87,39 @@ func (proto *Proto) ReadFile(path string, nl func(name string, size int64), pl f
 		if err != nil {
 			return false, err
 		}
-		nl(name, size)
-		sum, err := readFileContents(proto.conn.reader, proto.bs, path, name, size, pl)
+		nl("", name, size)
+		sum, err := readFileContents(proto.conn.reader, proto.bs, baseDir, name, size, false, pl)
+		if err != nil {
+			return false, err
+		}
+		origSum, err := readFileMD5(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		if sum != origSum {
+			return true, ErrInvalidMD5Sum
+		}
+		return true, nil
+	case OpFileWithPath:
+		name, size, err := readFileNameAndSize(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		relPath, err := readFilePath(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		relPath = filepath.FromSlash(relPath)
+		nl(relPath, name, size)
+		absDir, err := mkdirp(baseDir, relPath)
+		if err != nil {
+			return false, err
+		}
+		executable, err := readExecutableBit(proto.conn.reader)
+		if err != nil {
+			return false, err
+		}
+		sum, err := readFileContents(proto.conn.reader, proto.bs, absDir, name, size, executable, pl)
 		if err != nil {
 			return false, err
 		}
@@ -119,6 +168,16 @@ func readFileName(reader *bufio.Reader) (name string, err error) {
 	return
 }
 
+func readFilePath(reader *bufio.Reader) (ret string, err error) {
+	line, _, err := reader.ReadLine()
+	if err != nil {
+		err = errors.New("unable to read path")
+		return
+	}
+	ret = string(line)
+	return
+}
+
 func readFileSize(reader *bufio.Reader) (size int64, err error) {
 	err = binary.Read(reader, binary.LittleEndian, &size)
 	if err != nil {
@@ -138,10 +197,30 @@ func readFileMD5(reader *bufio.Reader) (name string, err error) {
 	return
 }
 
-func readFileContents(reader *bufio.Reader, bufferSize int, path string, name string, size int64, pl func(total int64)) (string, error) {
+func readExecutableBit(reader *bufio.Reader) (executable bool, err error) {
+	b, err := reader.ReadByte()
+	if err != nil {
+		err = errors.New("unable to read executable bit")
+		return
+	}
+	executable = b == 1
+	return
+}
+
+func readFileContents(reader *bufio.Reader, bufferSize int, path string, name string, size int64, executable bool, pl func(total int64)) (string, error) {
 	file, err := os.Create(filepath.Join(path, name))
 	if err != nil {
 		return "", errors.New("unable to create file")
+	}
+	if executable {
+		stat, err := file.Stat()
+		if err != nil {
+			return "", errors.New("unable to get file info")
+		}
+		mode := SetExecAny(stat.Mode())
+		if err = file.Chmod(mode); err != nil {
+			return "", errors.New("unable to set file mode")
+		}
 	}
 	//goland:noinspection GoUnhandledErrorResult
 	defer file.Close()
@@ -173,19 +252,29 @@ func readFileContents(reader *bufio.Reader, bufferSize int, path string, name st
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func (proto *Proto) SendFile(name string, ready func(size int64), l func(total int64)) error {
-	base := filepath.Base(name)
-	stat, err := os.Stat(name)
+func (proto *Proto) SendFile(baseDir string, filePath string, ready func(relDir string, size int64), l func(total int64)) error {
+	fileName := filepath.Base(filePath)
+	relDir, err := filepath.Rel(baseDir, filepath.Dir(filePath))
+	if err != nil {
+		return err
+	} else if relDir == "." {
+		relDir = ""
+	}
+	stat, err := os.Stat(filePath)
 	if err != nil {
 		return errors.New("unable to get file info")
 	}
 	size := stat.Size()
-	err = proto.conn.writer.WriteByte(OpFileWithMD5)
+	var executable byte
+	if IsExecAny(stat.Mode()) {
+		executable = 1
+	}
+	err = proto.conn.writer.WriteByte(OpFileWithPath)
 	if err != nil {
 		return errors.New("event type sending failed")
 	}
-	ready(size)
-	_, err = proto.conn.writer.WriteString(base + "\n")
+	ready(relDir, size)
+	_, err = proto.conn.writer.WriteString(fileName + "\n")
 	if err != nil {
 		return errors.New("file name sending failed")
 	}
@@ -198,11 +287,21 @@ func (proto *Proto) SendFile(name string, ready func(size int64), l func(total i
 		return errors.New("file size sending failed")
 	}
 
+	_, err = proto.conn.writer.WriteString(relDir + "\n")
+	if err != nil {
+		return errors.New("file path sending failed")
+	}
+
+	err = proto.conn.writer.WriteByte(executable)
+	if err != nil {
+		return errors.New("file mode sending failed")
+	}
+
 	if err = proto.conn.writer.Flush(); err != nil {
 		return errors.New("header flushing failed")
 	}
 
-	file, err := os.Open(name)
+	file, err := os.Open(filePath)
 	if err != nil {
 		return errors.New("unable to open file")
 	}
@@ -241,6 +340,14 @@ func (proto *Proto) SendFile(name string, ready func(size int64), l func(total i
 		return errors.New("data flushing error")
 	}
 	return nil
+}
+
+func SetExecAny(mode os.FileMode) os.FileMode {
+	return mode | 0111
+}
+
+func IsExecAny(mode os.FileMode) bool {
+	return mode&0111 != 0
 }
 
 func (proto *Proto) SendDone() error {

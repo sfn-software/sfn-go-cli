@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -37,6 +38,7 @@ const (
 )
 
 type TtyProgress struct {
+	relDir   string
 	fileName string
 	fileSize int64
 	bytes    int64
@@ -78,8 +80,9 @@ func parseTermSize(input string) (uint, uint, error) {
 	return uint(width), uint(height), nil
 }
 
-func NewProgress(fileName string, fileSize int64, direction State) *TtyProgress {
+func NewProgress(relDir string, fileName string, fileSize int64, direction State) *TtyProgress {
 	return &TtyProgress{
+		relDir:   relDir,
 		fileName: fileName,
 		fileSize: fileSize,
 		bytes:    0,
@@ -110,7 +113,12 @@ func (p *TtyProgress) Warning(err error) {
 func (p *TtyProgress) Draw(bytes int64) {
 	p.bytes = bytes
 	human, metrics := getSizeMetrics(bytes)
-	percent := uint((bytes * 100) / p.fileSize)
+	var percent uint
+	if p.fileSize > 0 {
+		percent = uint((bytes * 100) / p.fileSize)
+	} else {
+		percent = 100
+	}
 	if p.human != human || percent != p.percent || p.state == Done || p.state == Failed || p.state == Warning {
 		p.human = human
 		p.percent = percent
@@ -120,12 +128,13 @@ func (p *TtyProgress) Draw(bytes int64) {
 		stateSymbol, stateColor := getStateAttrs(p.state)
 		stateSymbol = Colored(stateSymbol, stateColor)
 
+		filePath := filepath.Join(p.relDir, p.fileName)
 		switch p.state {
 		case Failed, Warning:
-			fileNameWithErr := fixedLengthString(p.fileName+" → "+p.err.Error(), int(ttyWidth-2))
+			fileNameWithErr := fixedLengthString(filePath+" → "+p.err.Error(), int(ttyWidth-2))
 			fmt.Printf("%s %s\r", stateSymbol, fileNameWithErr)
 		default:
-			fileName := fixedLengthString(p.fileName, int(ttyWidth-ProgressBarWidth-21))
+			fileName := fixedLengthString(filePath, int(ttyWidth-ProgressBarWidth-21))
 			fmt.Printf("%s %s %4d %4s [%s] %3d %%\r", stateSymbol, fileName, human, metrics, progress, percent)
 		}
 	}

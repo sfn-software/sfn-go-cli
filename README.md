@@ -1,7 +1,7 @@
 # sfn
 Small and simple utility to send files over network.
 
-CLI implementation of sfn L4 in Go language.
+CLI implementation of sfn L4 in Go language (L5 is in beta).
 
 ![media/video.gif](media/video.gif)
 

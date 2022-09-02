@@ -52,7 +52,7 @@ func main() {
 			}
 			if err != nil {
 				fmt.Println(Colored("✘ Unable to open %s", ColorRed, arg))
-				continue
+				return
 			}
 			if stat.IsDir() {
 				if dirFiles, err := scanDir(argAbs); err == nil {
@@ -60,7 +60,7 @@ func main() {
 				}
 				if err != nil {
 					fmt.Println(Colored("✘ Unable to scan dir %s", ColorRed, arg))
-					continue
+					return
 				}
 			} else {
 				e := fileEntity{
@@ -80,7 +80,9 @@ func main() {
 		if _, err := conn.Connect(address); err == nil {
 			defer safeDisconnect(conn)
 			fmt.Println(Colored("⇄ Connected", ColorCyan))
-			processFiles(conn, files, dir)
+			proto := NewProto(conn)
+			sendFiles(proto, files)
+			receiveFiles(proto, dir)
 			fmt.Println(Colored("⇵ Transfer done", ColorCyan))
 		} else {
 			fmt.Println(Colored("✘ Unable to connect to %s", ColorRed, address))
@@ -90,7 +92,9 @@ func main() {
 		if _, err := conn.Listen(address); err == nil {
 			defer safeDisconnect(conn)
 			fmt.Println(Colored("⇄ Connected", ColorCyan))
-			processFiles(conn, files, dir)
+			proto := NewProto(conn)
+			receiveFiles(proto, dir)
+			sendFiles(proto, files)
 			fmt.Println(Colored("⇵ Transfer done", ColorCyan))
 		} else {
 			fmt.Println(Colored("✘ Unable to listen on %s", ColorRed, address))
@@ -100,8 +104,7 @@ func main() {
 	}
 }
 
-func processFiles(conn *Connection, files []fileEntity, dir string) {
-	proto := NewProto(conn)
+func sendFiles(proto *Proto, files []fileEntity) {
 	for _, file := range files {
 		var progress *TtyProgress
 		err := proto.SendFile(file.baseDir, file.filePath, func(relDir string, size int64) {
@@ -119,6 +122,9 @@ func processFiles(conn *Connection, files []fileEntity, dir string) {
 		}
 	}
 	_ = proto.SendDone()
+}
+
+func receiveFiles(proto *Proto, dir string) {
 	for {
 		var progress *TtyProgress
 		hasMore, err := proto.ReadFile(dir, func(relDir string, name string, size int64) {

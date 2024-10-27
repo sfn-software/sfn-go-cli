@@ -58,7 +58,7 @@ func GetTermSize() (uint, uint) {
 		return TermWidthDefault, TermHeightDefault
 	}
 	width, height, err := parseTermSize(string(out))
-	if err != nil {
+	if width <= 0 || height <= 0 || err != nil {
 		return TermWidthDefault, TermHeightDefault
 	}
 	return width, height
